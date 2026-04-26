@@ -1,10 +1,13 @@
 """
 数据源：akshare 实现。
+
+注意：akshare 的 py_mini_racer 依赖 V8，V8 的地址空间初始化有进程级互斥。
+因此所有 akshare 网络调用必须 **顺序执行**，不能使用 ThreadPoolExecutor 等并发，
+否则会触发 V8 的 `partition_address_space` 致命错误。
 """
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 
 import akshare as ak
@@ -45,43 +48,31 @@ class AkshareSource(DataSource):
             return pd.DataFrame()
         all_rows = []
         t0 = time.time()
-        prog_step = max(1, total // 10)  # 每10%打一次日志
-
-        def _fetch_one(code):
-            symbol = _to_symbol(code)
+        for idx, code in enumerate(codes, 1):
             try:
+                symbol = _to_symbol(code)
                 df = ak.fund_etf_hist_sina(symbol=symbol)
-            except Exception:
-                return None
-            if df is None or df.empty:
-                return None
-            df["code"] = code
-            df["date"] = pd.to_datetime(df["date"]).dt.date
-            return df[(df["date"] >= start) & (df["date"] <= end)]
-
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(_fetch_one, code) for code in codes]
-            for idx, future in enumerate(as_completed(futures), 1):
-                df = future.result()
-                if df is not None and not df.empty:
+                if df is None or df.empty:
+                    continue
+                df["code"] = code
+                df["date"] = pd.to_datetime(df["date"]).dt.date
+                df = df[(df["date"] >= start) & (df["date"] <= end)]
+                if not df.empty:
                     all_rows.append(df)
-                if idx % prog_step == 0 or idx == total:
-                    pct = idx / total * 100
-                    elapsed = time.time() - t0
-                    print(f"\r  ETF进度: {idx}/{total} ({pct:.0f}%) {elapsed:.0f}s", end="", flush=True)
+            except Exception:
+                pass
+            # 进度日志：每10%打印一次
+            if total > 10 and idx % max(1, total // 10) == 0:
+                pct = idx / total * 100
+                print(f"\r  ETF进度: {idx}/{total} ({pct:.0f}%) {time.time()-t0:.0f}s", end="", flush=True)
 
-        if total > prog_step:
+        if total > 10:
             print()
         if not all_rows:
             return pd.DataFrame()
         result = pd.concat(all_rows, ignore_index=True)
-        # 统一列名
-        cols = {
-            "open": "open", "high": "high", "low": "low",
-            "close": "close", "volume": "volume", "amount": "amount",
-            "pct_chg": "pct_chg",
-        }
-        keep = {"code", "date"} | set(cols.keys())
+        cols = {"open", "high", "low", "close", "volume", "amount", "pct_chg"}
+        keep = {"code", "date"} | cols
         for c in keep:
             if c not in result.columns:
                 result[c] = None
@@ -95,47 +86,35 @@ class AkshareSource(DataSource):
         end_str = end.strftime("%Y%m%d")
         all_rows = []
         t0 = time.time()
-        prog_step = max(1, total // 20)  # 每5%打一次日志
-
-        def _fetch_one(code):
-            symbol = _to_symbol(code)
+        for idx, code in enumerate(codes, 1):
             try:
+                symbol = _to_symbol(code)
+                # 不使用 adjust="qfq"：akshare 1.18.57 中前复权接口已损坏
                 df = ak.stock_zh_a_daily(
                     symbol=symbol, start_date=start_str,
-                    end_date=end_str, adjust="qfq",
+                    end_date=end_str, adjust="",
                 )
-            except Exception:
-                return None
-            if df is None or df.empty:
-                return None
-            df["code"] = code
-            return df
-
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(_fetch_one, code) for code in codes]
-            for idx, future in enumerate(as_completed(futures), 1):
-                df = future.result()
                 if df is not None and not df.empty:
+                    df["code"] = code
                     all_rows.append(df)
-                if idx % prog_step == 0 or idx == total:
-                    pct = idx / total * 100
-                    elapsed = time.time() - t0
-                    eta = elapsed / idx * (total - idx) if idx else 0
-                    print(f"\r  股票进度: {idx}/{total} ({pct:.0f}%) {elapsed:.0f}s 剩余~{eta:.0f}s", end="", flush=True)
+            except Exception:
+                pass
+            # 进度日志：每5%打印一次
+            if total > 20 and idx % max(1, total // 20) == 0:
+                pct = idx / total * 100
+                elapsed = time.time() - t0
+                eta = elapsed / idx * (total - idx) if idx else 0
+                print(f"\r  股票进度: {idx}/{total} ({pct:.0f}%) {elapsed:.0f}s 剩余~{eta:.0f}s", end="", flush=True)
 
-        if total > prog_step:
+        if total > 20:
             print()
         if not all_rows:
             return pd.DataFrame()
         result = pd.concat(all_rows, ignore_index=True)
         result["date"] = pd.to_datetime(result["date"]).dt.date
-        cols = {
-            "open": "open", "high": "high", "low": "low",
-            "close": "close", "volume": "volume", "amount": "amount",
-            "pct_chg": "pct_chg", "pre_close": "pre_close",
-            "turnover": "turnover",
-        }
-        keep = {"code", "date"} | set(cols.keys())
+        cols = {"open", "high", "low", "close", "volume", "amount",
+                "pct_chg", "pre_close", "turnover"}
+        keep = {"code", "date"} | cols
         for c in keep:
             if c not in result.columns:
                 result[c] = None

@@ -4,7 +4,8 @@
       "command": "${workspaceFolder}/venv/Scripts/python.exe",
       "args": ["-m", "mcp_server.server"],
       "env": {
-        "PROJECT_ROOT": "${workspaceFolder}"
+        "PROJECT_ROOT": "${workspaceFolder}",
+        "PYTHONIOENCODING": "utf-8"
       }
     }
   }

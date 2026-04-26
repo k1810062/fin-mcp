@@ -1,4 +1,14 @@
 {
+  "mcpServers": {
+    "fin-data": {
+      "command": "e:/VSproject/fin-mcp/venv/Scripts/python.exe",
+      "args": ["-m", "mcp_server.server"],
+      "env": {
+        "PROJECT_ROOT": "e:/VSproject/fin-mcp",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  },
   "permissions": {
     "allow": [
       "mcp__fin-data__fetch.market_data",
