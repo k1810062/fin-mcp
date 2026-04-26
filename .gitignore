@@ -1,0 +1,11 @@
+# 个人配置（不提交）
+.mcp.local.json
+.claude/settings.local.json
+
+# 数据文件
+fin_data.db
+
+# Python
+venv/
+__pycache__/
+*.pyc

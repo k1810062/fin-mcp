@@ -1,0 +1,76 @@
+{
+  "_comment": "fin-mcp 配置。环境变量可覆盖同名配置项。",
+
+  "etfs": [
+    { "industry": "半导体", "code": "512480", "name": "国联安半导体ETF" },
+    { "industry": "医药", "code": "512010", "name": "易方达医药ETF" },
+    { "industry": "酒", "code": "512690", "name": "鹏华酒ETF" },
+    { "industry": "光伏", "code": "159864", "name": "光伏ETF国泰" },
+    { "industry": "军工", "code": "512660", "name": "军工ETF国泰" },
+    { "industry": "银行", "code": "515290", "name": "银行ETF天弘" },
+    { "industry": "证券", "code": "159993", "name": "证券ETF鹏华" },
+    { "industry": "房地产", "code": "512200", "name": "房地产ETF南方" },
+    { "industry": "家电", "code": "159996", "name": "家电ETF国泰" },
+    { "industry": "钢铁", "code": "515210", "name": "钢铁ETF国泰" },
+    { "industry": "煤炭", "code": "515220", "name": "煤炭ETF国泰" },
+    { "industry": "有色金属", "code": "159881", "name": "有色金属ETF国泰" },
+    { "industry": "黄金", "code": "518880", "name": "黄金ETF华安" },
+    { "industry": "新能源车", "code": "159806", "name": "新能源车ETF国泰" },
+    { "industry": "锂电池", "code": "159840", "name": "锂电池ETF工银" },
+    { "industry": "储能", "code": "159566", "name": "储能电池ETF易方达" },
+    { "industry": "风电", "code": "159790", "name": "碳中和ETF华夏" },
+    { "industry": "碳中和", "code": "159790", "name": "碳中和ETF华夏" },
+    { "industry": "电力", "code": "159611", "name": "电力ETF广发" },
+    { "industry": "物流", "code": "516910", "name": "物流ETF富国" },
+    { "industry": "基建", "code": "516970", "name": "基建ETF广发" },
+    { "industry": "农业", "code": "159825", "name": "农业ETF富国" },
+    { "industry": "猪肉", "code": "159825", "name": "农业ETF富国" },
+    { "industry": "种业", "code": "159825", "name": "农业ETF富国" },
+    { "industry": "游戏", "code": "159869", "name": "游戏ETF华夏" },
+    { "industry": "传媒", "code": "512980", "name": "传媒ETF广发" },
+    { "industry": "通信", "code": "159994", "name": "通信ETF银华" },
+    { "industry": "5G", "code": "159811", "name": "5GETF博时" },
+    { "industry": "计算机", "code": "159998", "name": "计算机ETF天弘" },
+    { "industry": "软件", "code": "159852", "name": "软件ETF嘉实" },
+    { "industry": "大数据", "code": "515400", "name": "大数据ETF富国" },
+    { "industry": "云计算", "code": "159890", "name": "云计算ETF招商" },
+    { "industry": "人工智能", "code": "515070", "name": "人工智能ETF华夏" },
+    { "industry": "机器人", "code": "159770", "name": "机器人ETF天弘" },
+    { "industry": "消费电子", "code": "159732", "name": "消费电子ETF华夏" },
+    { "industry": "芯片", "code": "159995", "name": "芯片ETF华夏" },
+    { "industry": "科创", "code": "588000", "name": "科创50ETF华夏" },
+    { "industry": "双创", "code": "159782", "name": "双创50ETF银华" },
+    { "industry": "中证500", "code": "159982", "name": "中证500ETF鹏华" },
+    { "industry": "沪深300", "code": "159925", "name": "沪深300ETF南方" },
+    { "industry": "上证50", "code": "530050", "name": "上证50ETF东财" },
+    { "industry": "红利", "code": "159905", "name": "红利ETF工银" },
+    { "industry": "中证红利", "code": "515080", "name": "中证红利ETF招商" },
+    { "industry": "国企改革", "code": "159528", "name": "国企改革ETF富国" },
+    { "industry": "一带一路", "code": "515150", "name": "一带一路ETF富国" },
+    { "industry": "专精特新", "code": "563210", "name": "专精特新ETF富国" },
+    { "industry": "创新药", "code": "159992", "name": "创新药ETF银华" },
+    { "industry": "医疗器械", "code": "159883", "name": "医疗器械ETF永赢" },
+    { "industry": "数字经济", "code": "159658", "name": "数字经济ETF华安" },
+    { "industry": "食品饮料", "code": "159736", "name": "食品饮料ETF天弘" },
+    { "industry": "化工", "code": "516020", "name": "化工ETF国泰" },
+    { "industry": "稀土", "code": "159713", "name": "稀土ETF富国" },
+    { "industry": "建材", "code": "159745", "name": "建材ETF易方达" }
+  ],
+
+  "data_sources": {
+    "preferred": "akshare",
+    "fallback": "akshare",
+    "pcf": "pcf_official"
+  },
+
+  "automation": {
+    "enabled": false,
+    "auto_update_pcf": false,
+    "auto_update_quotes": false,
+    "auto_detect_changes": false,
+    "schedule": {
+      "pcf_time": "08:35",
+      "quote_time": "15:35"
+    }
+  }
+}
