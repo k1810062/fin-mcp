@@ -64,6 +64,27 @@ def handle_db_stats(engine: Engine) -> dict:
     }
 
 
+def handle_backfill_quotes(engine: Engine) -> dict:
+    """手动触发：回填缺失的 pre_close/pct_chg/change"""
+    from ..core.fetcher import backfill_quote_fields
+    return backfill_quote_fields(engine)
+
+
+def handle_backfill_changes(
+    engine: Engine,
+    etf_codes: list[str] | None = None,
+) -> dict:
+    """手动触发：从现有 PCF 数据回填成分股变更"""
+    from ..core.fetcher import backfill_component_changes
+    return backfill_component_changes(engine, etf_codes)
+
+
+def handle_backfill_weights(engine: Engine) -> dict:
+    """手动触发：计算所有 ETF 成分股权重"""
+    from ..core.fetcher import backfill_component_weights
+    return backfill_component_weights(engine)
+
+
 def _check_missing_quotes(engine: Engine) -> dict:
     """检查：有成分股记录但没有行情的股票"""
     with Session(engine) as session:

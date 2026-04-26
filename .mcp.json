@@ -1,10 +1,10 @@
 {
   "mcpServers": {
     "fin-data": {
-      "command": "${workspaceFolder}/venv/Scripts/python.exe",
+      "command": "venv/Scripts/python.exe",
       "args": ["-m", "mcp_server.server"],
       "env": {
-        "PROJECT_ROOT": "${workspaceFolder}",
+        "PROJECT_ROOT": ".",
         "PYTHONIOENCODING": "utf-8"
       }
     }

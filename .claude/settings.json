@@ -1,28 +1,3 @@
 {
-  "mcpServers": {
-    "fin-data": {
-      "command": "e:/VSproject/fin-mcp/venv/Scripts/python.exe",
-      "args": ["-m", "mcp_server.server"],
-      "env": {
-        "PROJECT_ROOT": "e:/VSproject/fin-mcp",
-        "PYTHONIOENCODING": "utf-8"
-      }
-    }
-  },
-  "permissions": {
-    "allow": [
-      "mcp__fin-data__fetch.market_data",
-      "mcp__fin-data__fetch.pcf_components",
-      "mcp__fin-data__query.etf_info",
-      "mcp__fin-data__query.daily_quotes",
-      "mcp__fin-data__query.components",
-      "mcp__fin-data__query.summary",
-      "mcp__fin-data__query.changes",
-      "mcp__fin-data__query.basket",
-      "mcp__fin-data__components.manage",
-      "mcp__fin-data__export.to_excel",
-      "mcp__fin-data__maintenance.check",
-      "mcp__fin-data__maintenance.stats"
-    ]
-  }
+  "enabledMcpjsonServers": ["fin-data"]
 }

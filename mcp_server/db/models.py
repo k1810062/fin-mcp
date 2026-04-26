@@ -108,7 +108,6 @@ class DailyQuote(Base):
     amount = Column(Float, nullable=True)
     pct_chg = Column(Float, nullable=True, comment="涨跌幅(%)")
     change = Column(Float, nullable=True, comment="涨跌额")
-    turnover = Column(Float, nullable=True, comment="换手率(%)")
 
     __table_args__ = (
         UniqueConstraint("stock_code", "trade_date", name="uq_stock_date"),
@@ -133,6 +132,7 @@ class EtfDailyQuote(Base):
     volume = Column(Float, nullable=True)
     amount = Column(Float, nullable=True)
     pct_chg = Column(Float, nullable=True)
+    change = Column(Float, nullable=True, comment="涨跌额")
     nav = Column(Float, nullable=True, comment="单位净值")
     nav_per_cu = Column(Float, nullable=True, comment="每百万份净值")
 

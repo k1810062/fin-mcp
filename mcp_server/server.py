@@ -57,19 +57,23 @@ def fetch_market_data(
     name="fetch.pcf_components",
     description="""获取PCF成分股快照。
 Mode A (batch): 批量获取全部ETF→入库→返回摘要
+  单日: 传 trade_date
+  多日: 传 trade_date + end_date，遍历每个交易日
 Mode B (query): 获取单只ETF明细
-参数: etf_codes, trade_date, mode, detect_changes
+参数: etf_codes, trade_date, end_date, mode, detect_changes
 """,
 )
 def fetch_pcf_components(
     etf_codes: Optional[list[str]] = None,
     trade_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     mode: str = "batch",
     detect_changes: bool = True,
 ) -> dict:
     from .tools.fetch import handle_fetch_pcf
     return handle_fetch_pcf(
         _engine, _router, etf_codes, trade_date, mode, detect_changes,
+        end_date=end_date,
     )
 
 
@@ -186,11 +190,40 @@ def maintenance_stats() -> dict:
     return handle_db_stats(_engine)
 
 
+@mcp.tool(
+    name="maintenance.backfill_quotes",
+    description="回填 DailyQuote 和 EtfDailyQuote 中缺失的 pre_close/pct_chg/change 字段。幂等，只填 NULL。",
+)
+def maintenance_backfill_quotes() -> dict:
+    from .tools.maintenance import handle_backfill_quotes
+    return handle_backfill_quotes(_engine)
+
+
+@mcp.tool(
+    name="maintenance.backfill_changes",
+    description="从现有 PCF 数据回填缺失的 ComponentChange 记录。遍历每只 ETF 的所有 PCF 快照日期，逐对比较。幂等。",
+)
+def maintenance_backfill_changes(
+    etf_codes: Optional[list[str]] = None,
+) -> dict:
+    from .tools.maintenance import handle_backfill_changes
+    return handle_backfill_changes(_engine, etf_codes)
+
+
+@mcp.tool(
+    name="maintenance.backfill_weights",
+    description="计算所有 ETF 成分股权重。weight_i = quantity_i × close_i / Σ(quantity_j × close_j) × 100。幂等。",
+)
+def maintenance_backfill_weights() -> dict:
+    from .tools.maintenance import handle_backfill_weights
+    return handle_backfill_weights(_engine)
+
+
 # ── 启动 ─────────────────────────────────────────────────────────
 
 
 def start():
-    """初始化并启动 MCP Server（stdio 模式）"""
+    """初始化并启动 MCP Server（默认 stdio 模式）"""
     global _engine, _router
 
     logging.basicConfig(
@@ -199,6 +232,16 @@ def start():
         datefmt="%H:%M:%S",
     )
     logger = logging.getLogger(__name__)
+
+    # 解析命令行参数：--transport (stdio/sse/streamable-http) --port
+    transport = "stdio"
+    port = 8080
+    args = [a for a in sys.argv[1:] if not a.startswith("-m")]  # 过滤 -m 参数
+    for i, a in enumerate(args):
+        if a == "--transport" and i + 1 < len(args):
+            transport = args[i + 1]
+        elif a == "--port" and i + 1 < len(args):
+            port = int(args[i + 1])
 
     # 确保 UTF-8
     if hasattr(sys.stdout, "reconfigure"):
@@ -212,16 +255,19 @@ def start():
 
     # 初始化数据库 & 数据源
     _engine = get_engine(config.db_url)
-    sync_etf_config(_engine, config)  # 同步 config ETF 列表到 DB（去重）
+    sync_etf_config(_engine, config)
     _router = DataSourceRouter(
         preferred=config.data_sources.preferred,
         fallback=config.data_sources.fallback,
         pcf_source=config.data_sources.pcf_source,
     )
 
-    # 以 stdio 模式运行
-    logger.info("MCP Server 就绪，等待请求...")
-    mcp.run(transport="stdio")
+    if transport == "stdio":
+        logger.info("MCP Server 就绪（stdio），等待请求...")
+        mcp.run(transport="stdio")
+    else:
+        logger.info(f"MCP Server 启动（{transport}），监听 :{port}...")
+        mcp.run(transport=transport, mount_path=f"/{transport}" if transport == "streamable-http" else None)
 
 
 if __name__ == "__main__":

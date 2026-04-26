@@ -14,6 +14,17 @@ from ..db.models import EtfDailyQuote
 from ..ds.router import DataSourceRouter
 
 
+def _today_if_closed(end: date) -> date:
+    """收盘前（15:30）自动排除当天，避免拉取未发布数据"""
+    if end < date.today():
+        return end
+    now = datetime.now()
+    market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    if now < market_close:
+        end = end - timedelta(days=1)
+    return end
+
+
 def handle_fetch_market_data(
     engine: Engine,
     router: DataSourceRouter,
@@ -42,6 +53,7 @@ def handle_fetch_market_data(
 
     # 非交易日时向前找最近交易日
     if mode == "batch":
+        e = _today_if_closed(e)
         s = _prev_trade_day(router, s)
         e = _prev_trade_day(router, e) if e != s else s
 
@@ -77,7 +89,9 @@ def handle_fetch_pcf(
     ed = date.fromisoformat(end_date) if end_date else None
 
     if mode == "batch":
+        raw_td = _today_if_closed(raw_td)
         if ed:
+            ed = _today_if_closed(ed)
             # 范围模式：不调 _prev_trade_day，让 trading_days 自动过滤非交易日
             result = batch_fetch_pcf(engine, router, etf_codes, raw_td, detect_changes, end_date=ed)
         else:

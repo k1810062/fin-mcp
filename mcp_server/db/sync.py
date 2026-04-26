@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, inspect, text
 from sqlalchemy.orm import Session
 
 from ..config import AppConfig
@@ -14,9 +14,24 @@ from .models import EtfInfo, EtfIndustryLink, Industry
 
 logger = logging.getLogger(__name__)
 
+_MIGRATIONS_DONE = set()
+
+
+def _run_migrations(engine: Engine):
+    """SQLite 兼容的增量迁移。每次新增列时在这里追加。"""
+    inspector = inspect(engine)
+    cols = {c["name"] for c in inspector.get_columns("etf_daily_quotes")}
+
+    if "change" not in cols:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE etf_daily_quotes ADD COLUMN change FLOAT"))
+            conn.commit()
+            logger.info("迁移: etf_daily_quotes 添加 change 列")
+
 
 def sync_etf_config(engine: Engine, config: AppConfig):
     """将 config.etfs 同步到 etf_info / industries / etf_industry_links 表，自动去重。"""
+    _run_migrations(engine)
     with Session(engine) as session:
         # 按 code 去重，保留所有行业映射
         etf_map: dict[str, dict] = {}  # code -> {name, industries:set}

@@ -83,6 +83,7 @@ def get_daily_quotes(
             rec["close"] = r.close
             rec["pre_close"] = r.pre_close
             rec["pct_chg"] = r.pct_chg
+            rec["change"] = r.change
             rec["volume"] = r.volume
             rec["amount"] = r.amount
             if asset_type == "etf":
@@ -168,6 +169,7 @@ def get_summary(
                 "name": etf.name,
                 "industries": industries,
                 "close": eq.close,
+                "change": eq.change,
                 "pct_chg": eq.pct_chg,
                 "amount": eq.amount,
                 "nav": eq.nav,

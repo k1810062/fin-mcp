@@ -84,6 +84,11 @@ def batch_fetch_market_data(
         stock_result = _batch_fetch_stock_quotes(engine, router, codes, start_date, end_date)
         result["stock"] = stock_result
 
+    # 后处理：回填缺失的 pre_close / pct_chg / change
+    backfill_result = backfill_quote_fields(engine)
+    # 后处理：计算成分股权重
+    weight_result = backfill_component_weights(engine)
+
     _write_log(engine, "quote", result)
 
     return {
@@ -93,6 +98,8 @@ def batch_fetch_market_data(
             "etf_rows": result.get("etf", {}).get("rows", 0),
             "stock_updated": result.get("stock", {}).get("updated", 0),
             "stock_rows": result.get("stock", {}).get("rows", 0),
+            "backfill_fixed": sum(backfill_result.values()),
+            "weights_calculated": sum(weight_result.values()),
             "duration_s": round(time.time() - _t0, 1),
         },
     }
@@ -127,10 +134,12 @@ def _batch_fetch_etf_quotes(
             close_val = _f(row.get("close"))
             pre_close_val = _get_prev_close_etf(session, etf.id, td)
             pct_chg = _calc_pct_chg(close_val, pre_close_val)
+            change_val = close_val - pre_close_val if close_val is not None and pre_close_val is not None else None
 
             # UPSERT：记录存在则更新，不存在则插入
             record = session.query(EtfDailyQuote).filter_by(etf_id=etf.id, trade_date=td).first()
             if record:
+                record.etf_code = code
                 record.open = _f(row.get("open"))
                 record.high = _f(row.get("high"))
                 record.low = _f(row.get("low"))
@@ -139,6 +148,7 @@ def _batch_fetch_etf_quotes(
                 record.volume = _f(row.get("volume"))
                 record.amount = _f(row.get("amount"))
                 record.pct_chg = pct_chg
+                record.change = change_val
             else:
                 session.add(EtfDailyQuote(
                     etf_id=etf.id,
@@ -152,6 +162,7 @@ def _batch_fetch_etf_quotes(
                     volume=_f(row.get("volume")),
                     amount=_f(row.get("amount")),
                     pct_chg=pct_chg,
+                    change=change_val,
                 ))
             count += 1
             updated_etfs.add(code)
@@ -180,16 +191,23 @@ def _batch_fetch_stock_quotes(
     if not codes:
         return {"updated": 0, "rows": 0}
 
-    # 先去重：只拉 DB 中缺失的记录
+    # 查已有记录，判断哪些 code 需要拉：缺失日期 or 最后交易日 pct_chg 为 NULL
     with Session(engine) as session:
         existing = set()
-        for r in session.query(DailyQuote.stock_code, DailyQuote.trade_date).filter(
+        incomplete = set()
+        for r in session.query(DailyQuote).filter(
             DailyQuote.trade_date.between(start, end)
         ).all():
             existing.add((r.stock_code, r.trade_date))
+            # 只检查最后一天的数据是否完整，避免首日无 pre_close 误判
+            if r.trade_date == end and r.pct_chg is None:
+                incomplete.add(r.stock_code)
 
     missing = []
     for code in codes:
+        if code in incomplete:
+            missing.append(code)
+            continue
         cur = start
         while cur <= end:
             if (code, cur) not in existing:
@@ -205,39 +223,52 @@ def _batch_fetch_stock_quotes(
     if df.empty:
         return {"updated": 0, "rows": 0}
 
-    with Session(engine) as session:
-        existing = set()
-        for r in session.query(DailyQuote.stock_code, DailyQuote.trade_date).all():
-            existing.add((r.stock_code, r.trade_date))
+    # 按 date ASC 排序，确保 pre_close 逐步可查
+    df = df.sort_values("date")
 
+    with Session(engine) as session:
         count = 0
         for _, row in df.iterrows():
             td = row["date"]
             if isinstance(td, str):
                 td = date.fromisoformat(td)
             code = str(row["code"]).zfill(6)
-            if (code, td) in existing:
-                continue
 
             close_val = _f(row.get("close"))
             pre_val = _get_prev_close_stock(session, code, td)
             pct_chg = _calc_pct_chg(close_val, pre_val)
 
-            session.add(DailyQuote(
-                stock_code=code,
-                trade_date=td,
-                open=_f(row.get("open")),
-                high=_f(row.get("high")),
-                low=_f(row.get("low")),
-                close=close_val,
-                pre_close=pre_val,
-                volume=_f(row.get("volume")),
-                amount=_f(row.get("amount")),
-                pct_chg=pct_chg,
-                change=close_val - pre_val if close_val is not None and pre_val is not None else None,
-                turnover=_f(row.get("turnover")),
-            ))
-            count += 1
+            # UPSERT：已存在则更新缺失字段，不存在则插入
+            record = session.query(DailyQuote).filter_by(
+                stock_code=code, trade_date=td
+            ).first()
+            if record:
+                if record.pct_chg is None:
+                    record.open = _f(row.get("open"))
+                    record.high = _f(row.get("high"))
+                    record.low = _f(row.get("low"))
+                    record.close = close_val
+                    record.pre_close = pre_val
+                    record.volume = _f(row.get("volume"))
+                    record.amount = _f(row.get("amount"))
+                    record.pct_chg = pct_chg
+                    record.change = close_val - pre_val if close_val is not None and pre_val is not None else None
+                    count += 1
+            else:
+                session.add(DailyQuote(
+                    stock_code=code,
+                    trade_date=td,
+                    open=_f(row.get("open")),
+                    high=_f(row.get("high")),
+                    low=_f(row.get("low")),
+                    close=close_val,
+                    pre_close=pre_val,
+                    volume=_f(row.get("volume")),
+                    amount=_f(row.get("amount")),
+                    pct_chg=pct_chg,
+                    change=close_val - pre_val if close_val is not None and pre_val is not None else None,
+                ))
+                count += 1
 
         session.commit()
 
@@ -429,6 +460,7 @@ def _save_pcf(session: Session, result: dict, trade_date: date, detect_changes: 
         else:
             session.add(EtfDailyQuote(
                 etf_id=etf.id, trade_date=trade_date,
+                etf_code=etf_code,
                 nav=nav, nav_per_cu=nav_per_cu,
             ))
         session.commit()
@@ -542,3 +574,260 @@ def _write_log(engine: Engine, update_type: str, detail: dict):
             detail=json.dumps(detail, ensure_ascii=False, default=str),
         ))
         session.commit()
+
+
+def backfill_quote_fields(engine: Engine) -> dict:
+    """回填行情衍生字段：pre_close / pct_chg / change。
+
+    扫描 DailyQuote 和 EtfDailyQuote 中为 NULL 的字段，
+    用已有数据计算填入。只填 NULL，不覆盖现有值。
+    幂等，可安全重复运行。
+    """
+    logger.info("开始回填行情衍生字段...")
+    t0 = time.time()
+    result = {"stock": 0, "etf": 0}
+
+    with Session(engine) as session:
+        # ── DailyQuote: pre_close ──
+        rows = session.query(DailyQuote).filter(
+            DailyQuote.pre_close.is_(None)
+        ).order_by(DailyQuote.stock_code, DailyQuote.trade_date).all()
+
+        last_close: dict[str, float | None] = {}
+        for row in rows:
+            code = row.stock_code
+            if code not in last_close:
+                prev = session.query(DailyQuote.close).filter(
+                    DailyQuote.stock_code == code,
+                    DailyQuote.trade_date < row.trade_date,
+                    DailyQuote.close.isnot(None),
+                ).order_by(DailyQuote.trade_date.desc()).first()
+                last_close[code] = prev[0] if prev else None
+
+            if last_close[code] is not None:
+                row.pre_close = last_close[code]
+                result["stock"] += 1
+
+            if row.close is not None:
+                last_close[code] = row.close
+        session.commit()
+
+        # ── DailyQuote: pct_chg / change ──
+        rows = session.query(DailyQuote).filter(
+            DailyQuote.pct_chg.is_(None),
+            DailyQuote.close.isnot(None),
+            DailyQuote.pre_close.isnot(None),
+        ).all()
+        for row in rows:
+            row.pct_chg = _calc_pct_chg(row.close, row.pre_close)
+            row.change = round(row.close - row.pre_close, 4)
+            result["stock"] += 1
+        session.commit()
+
+        # ── EtfDailyQuote: pre_close ──
+        erows = session.query(EtfDailyQuote).filter(
+            EtfDailyQuote.pre_close.is_(None)
+        ).order_by(EtfDailyQuote.etf_id, EtfDailyQuote.trade_date).all()
+
+        last_close_etf: dict[int, float | None] = {}
+        for row in erows:
+            eid = row.etf_id
+            if eid not in last_close_etf:
+                prev = session.query(EtfDailyQuote.close).filter(
+                    EtfDailyQuote.etf_id == eid,
+                    EtfDailyQuote.trade_date < row.trade_date,
+                    EtfDailyQuote.close.isnot(None),
+                ).order_by(EtfDailyQuote.trade_date.desc()).first()
+                last_close_etf[eid] = prev[0] if prev else None
+
+            if last_close_etf[eid] is not None:
+                row.pre_close = last_close_etf[eid]
+                result["etf"] += 1
+
+            if row.close is not None:
+                last_close_etf[eid] = row.close
+        session.commit()
+
+        # ── EtfDailyQuote: pct_chg / change ──
+        erows = session.query(EtfDailyQuote).filter(
+            EtfDailyQuote.pct_chg.is_(None),
+            EtfDailyQuote.close.isnot(None),
+            EtfDailyQuote.pre_close.isnot(None),
+        ).all()
+        for row in erows:
+            row.pct_chg = _calc_pct_chg(row.close, row.pre_close)
+            row.change = round(row.close - row.pre_close, 4)
+            result["etf"] += 1
+        session.commit()
+
+    elapsed = time.time() - t0
+    total = sum(result.values())
+    logger.info(f"行情回填完成: {total} 条 ({elapsed:.1f}s)")
+    return result
+
+
+def backfill_component_changes(
+    engine: Engine,
+    etf_codes: list[str] | None = None,
+) -> dict:
+    """从现有 PCF 数据回填缺失的 ComponentChange 记录。
+
+    遍历每只 ETF 的所有 PCF 快照日期（升序），
+    逐对连续日期比较，记录成分股变更。
+    若某 (etf_id, trade_date) 已存在变更记录则跳过。
+    幂等，可安全重复运行。
+    """
+    logger.info("开始回填成分股变更...")
+    t0 = time.time()
+
+    config = get_config()
+    if etf_codes is None:
+        etf_codes = list({e["code"] for e in config.etfs})
+
+    total_new = 0
+    total_skipped = 0
+
+    with Session(engine) as session:
+        for code in etf_codes:
+            etf = session.query(EtfInfo).filter_by(code=code).first()
+            if not etf:
+                continue
+
+            dates_r = session.query(EtfComponent.trade_date).filter(
+                EtfComponent.etf_id == etf.id,
+                EtfComponent.source == "pcf",
+            ).distinct().order_by(EtfComponent.trade_date.asc()).all()
+
+            dates = [r[0] for r in dates_r]
+            if len(dates) < 2:
+                continue
+
+            for i in range(1, len(dates)):
+                prev_td, curr_td = dates[i - 1], dates[i]
+
+                existing = session.query(ComponentChange).filter(
+                    ComponentChange.etf_id == etf.id,
+                    ComponentChange.trade_date == curr_td,
+                ).first()
+                if existing:
+                    total_skipped += 1
+                    continue
+
+                prev_rows = session.query(EtfComponent).filter(
+                    EtfComponent.etf_id == etf.id,
+                    EtfComponent.trade_date == prev_td,
+                    EtfComponent.substitute_flag != "2",
+                ).all()
+                curr_rows = session.query(EtfComponent).filter(
+                    EtfComponent.etf_id == etf.id,
+                    EtfComponent.trade_date == curr_td,
+                    EtfComponent.substitute_flag != "2",
+                ).all()
+                if not prev_rows or not curr_rows:
+                    continue
+
+                prev_map = {r.stock_code: r for r in prev_rows}
+                curr_map = {r.stock_code: r for r in curr_rows}
+                prev_codes = set(prev_map.keys())
+                curr_codes = set(curr_map.keys())
+
+                changes = []
+                for sc in curr_codes - prev_codes:
+                    c = curr_map[sc]
+                    changes.append(ComponentChange(
+                        etf_id=etf.id, etf_code=code, trade_date=curr_td,
+                        stock_code=sc, stock_name=c.stock_name,
+                        change_type="added",
+                        old_quantity=None, new_quantity=c.quantity,
+                    ))
+                for sc in prev_codes - curr_codes:
+                    p = prev_map[sc]
+                    changes.append(ComponentChange(
+                        etf_id=etf.id, etf_code=code, trade_date=curr_td,
+                        stock_code=sc, stock_name=p.stock_name,
+                        change_type="removed",
+                        old_quantity=p.quantity, new_quantity=None,
+                    ))
+                for sc in prev_codes & curr_codes:
+                    p, c = prev_map[sc], curr_map[sc]
+                    if p.quantity != c.quantity:
+                        changes.append(ComponentChange(
+                            etf_id=etf.id, etf_code=code, trade_date=curr_td,
+                            stock_code=sc, stock_name=c.stock_name,
+                            change_type="quantity_changed",
+                            old_quantity=p.quantity, new_quantity=c.quantity,
+                        ))
+
+                for ch in changes:
+                    session.add(ch)
+                total_new += len(changes)
+
+            session.commit()
+
+    elapsed = time.time() - t0
+    logger.info(f"成分股变更回填完成: {total_new} 新增, {total_skipped} 跳过 ({elapsed:.1f}s)")
+    return {"new_changes": total_new, "skipped_dates": total_skipped, "duration_s": round(elapsed, 1)}
+
+
+def backfill_component_weights(engine: Engine) -> dict:
+    """计算所有 ETF 成分股权重。
+
+    对每只 ETF 每个交易日，用 PCF 数量 × 当日收盘价 计算：
+
+        weight_i = quantity_i × close_i / Σ(quantity_j × close_j) × 100
+
+    只填 NULL 或重新计算全量。幂等。
+    """
+    logger.info("开始回填成分股权重...")
+    t0 = time.time()
+
+    with Session(engine) as session:
+        # 获取所有有 quantity 的成分股记录
+        rows = session.query(EtfComponent).filter(
+            EtfComponent.quantity.isnot(None),
+        ).all()
+
+        # 按 (etf_id, trade_date) 分组
+        groups: dict[tuple[int, date], list[EtfComponent]] = {}
+        for r in rows:
+            groups.setdefault((r.etf_id, r.trade_date), []).append(r)
+
+        total_updated = 0
+        total_skipped = 0
+
+        for (etf_id, td), comps in groups.items():
+            # 查每只成分股的收盘价
+            codes = [c.stock_code for c in comps]
+            quotes = {
+                r.stock_code: r.close
+                for r in session.query(DailyQuote).filter(
+                    DailyQuote.stock_code.in_(codes),
+                    DailyQuote.trade_date == td,
+                    DailyQuote.close.isnot(None),
+                ).all()
+            }
+
+            # 计算篮子总价值
+            basket_values = []
+            for c in comps:
+                close = quotes.get(c.stock_code)
+                if close is not None and c.quantity is not None:
+                    basket_values.append(c.quantity * close)
+                else:
+                    basket_values.append(0.0)
+
+            total_value = sum(basket_values)
+            if total_value == 0:
+                total_skipped += len(comps)
+                continue
+
+            for c, bv in zip(comps, basket_values):
+                weight = round(bv / total_value * 100, 4) if bv > 0 else 0.0
+                c.weight = weight
+                total_updated += 1
+
+        session.commit()
+
+    elapsed = time.time() - t0
+    logger.info(f"成分股权重回填完成: {total_updated} 更新, {total_skipped} 跳过 ({elapsed:.1f}s)")
+    return {"updated": total_updated, "skipped": total_skipped, "duration_s": round(elapsed, 1)}
